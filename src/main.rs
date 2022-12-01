@@ -140,6 +140,160 @@
 //!     fn make_button(&mut self) -> WindowButton<Mutable> {todo!()}
 //! }
 //! ```
+//!
+//! For the buttons it look the same, just there will be one shared trait,
+//! that has associated type of parent.
+//!
+//! ```
+//! trait Button<T: ProbablyMutable>
+//! where
+//!     Self: Sized,
+//! {
+//!     type Parent;
+//!     fn new(parent: Self::Parent, id: usize) -> Option<Self>;
+//!     fn get_id(&self) -> usize;
+//!     fn is_clicked(&self) -> bool;
+//!     fn get_text(&self) -> &String;
+//! }
+//! trait ButtonMut
+//! where
+//!     Self: Sized,
+//! {
+//!     type Parent;
+//!     fn click(&mut self);
+//!     fn set_text(&mut self, text: impl Into<String>);
+//! }
+//! struct WindowButton<'a, T: ProbablyMutable> {
+//!     id: usize,
+//!     text: String,
+//!     parent: &'a Window<'a, T>,
+//! }
+//! impl<'a, T: ProbablyMutable> Button<T> for WindowButton<'a, T> {
+//!     type Parent = &'a Window<'a, T>;
+//!     fn new(parent: Self::Parent, id: usize) -> Option<Self>;
+//!     fn get_id(&self) -> usize;
+//!     fn is_clicked(&self) -> bool;
+//!     fn get_text(&self) -> &String;
+//! }
+//! impl<'a> ButtonMut for WindowButton<'a, Mutable> {
+//!     type Parent = Window<'a, Mutable>;
+//!     fn click(&mut self);
+//!     fn set_text(&mut self, text: impl Into<String>);
+//! }
+//!
+//! struct FrameButton<'a, T: ProbablyMutable> {
+//!     id: usize,
+//!     text: String,
+//!     parent: &'a Frame<'a, T>,
+//! }
+//! impl<'a, T: ProbablyMutable> Button<T> for FrameButton<'a, T> {
+//!     type Parent = &'a Frame<'a, T>;
+//!     fn new(parent: Self::Parent, id: usize) -> Option<Self>;
+//!     fn get_id(&self) -> usize;
+//!     fn is_clicked(&self) -> bool;
+//!     fn get_text(&self) -> &String;
+//! }
+//! impl<'a> ButtonMut for FrameButton<'a, Mutable> {
+//!     type Parent = Frame<'a, Mutable>;
+//!     fn click(&mut self) ;
+//!     fn set_text(&mut self, text: impl Into<String>);
+//! }
+//! ```
+//!
+//! All the rest is just a bit of boilerplate. You can surf the entire implementation
+//! later.
+//!
+//! # Let's try to play around:
+//!
+//! At first, let's get our root and make sure we will see an output.
+//! For the file rust env `RUST_LOG=debug` should be set.
+//!
+//! ```ignore
+//! env_logger::init();
+//! let mut root = Root::new();
+//! ```
+//!
+//! ```ignore
+//! let window1: Window<Mutable> = root.make_child();
+//! ```
+//!
+//! Looks good. Adding a window mutates our root, so, window1 is also mut.
+//! Let's add one more!
+//!
+//! ```ignore
+//! let window2 = root.make_child();
+//! ```
+//!
+//! Guh!: `Err: cannot borrow root as mutable more than once at a time`.
+//! But, generally, this is how it should look like.
+//!
+//! Let's drop our window, but keep its id to get it later.
+//!
+//! ```ignore
+//! let w1_id: usize = window1.get_id();
+//! debug!("{}", w1_id);
+//! drop(window1);
+//! ```
+//! Now root is immutable again.
+//!
+//! Let's make sure it is and get 2 windows:
+//! 
+//! ```ignore
+//! let id2: usize = root.make_child().get_id();
+//! let window1: Window<Immutable> = root.get_child(w1_id).unwrap();
+//! let _window2: Window<Immutable> = root.get_child(id2).unwrap(); // OK!
+//! ```
+//!
+//! Interesting, now they are `<Immutable>`. So, if we try to mutate it,
+//! compiler will error:
+//!
+//! ```ignore
+//! window1.make_button();
+//! //
+//! Err: no method named `make_button` found for struct `Window<'_,
+//! test::Immutable>` in the current scope. The method was found for
+//! `Window<'a, test::Mutable>`
+//! ```
+//!
+//! Continuing:
+//!
+//! ```ignore
+//! let mut window1: Window<Mutable> = root.get_child_mut(w1_id).unwrap();
+//! let button: WindowButton<Mutable> = window1.make_button();
+//! let b_id: usize = button.get_id();
+//! // button is dropped.
+//! let mut frame: Frame<Mutable> = window1.make_frame();
+//! let fr_b_id: usize = frame.make_button().get_id();
+//! let f_id: usize = frame.get_id();
+//! // frame is dropped.
+//! debug!("button text: {}", button.get_text());
+//! //
+//! Err: cannot borrow `window1` as mutable more than once at a time
+//! ```
+//!
+//! Yes, because `button` was WindowButton<Mutable>.
+//! But, can we borrow button as immutable?
+//!
+//! ```ignore
+//! let button: WindowButton<Immutable> = window1.get_button(b_id);
+//! Err: no method named `get_button` found for struct `Window<'_, test::Mutable>`
+//! in the current scope the method was found for - `Window<'a, test::Immutable>`
+//! ```
+//!
+//! Now, check that multiple immutable borrows live together:
+//! ```
+//! let window1: Window<Immutable> = root.get_child(w1_id).unwrap();
+//! let frame: Frame<Immutable> = window1.get_frame(f_id).unwrap();
+//! let w_b: WindowButton<Immutable> = window1.get_button(b_id).unwrap();
+//! let fr_b: FrameButton<Immutable> = frame.get_button(fr_b_id).unwrap();
+//!
+//! debug!("is window button clicked: {}", w_b.is_clicked());
+//! debug!("is frame button clicked: {}", fr_b.is_clicked());
+//! ```
+//!
+//! See full module at [GitHub](https://github.com/Levitanus/generic_mutability_test)!
+//! These docs are available at 
+//! [GitHub pages](https://levitanus.github.io/generic-mutability-test-doc/generic_mutability_test/index.html).
 use std::marker::PhantomData;
 
 use log::debug;
